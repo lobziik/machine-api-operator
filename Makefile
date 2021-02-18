@@ -117,7 +117,7 @@ deploy-kubemark:
 .PHONY: test
 test: ## Run tests
 	@echo -e "\033[32mTesting...\033[0m"
-	$(DOCKER_CMD) hack/ci-test.sh
+	$(DOCKER_CMD) hack/unit-tests.sh
 
 unit:
 	$(DOCKER_CMD) go test ./pkg/... ./cmd/...

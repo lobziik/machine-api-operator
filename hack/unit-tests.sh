@@ -31,8 +31,8 @@ function runTestsCI() {
     go get -u github.com/jstemmer/go-junit-report
     go test -v ./pkg/... ./cmd/... | tee >(go-junit-report > "$JUNIT_LOCATION")
   else
-    echo "\$ARTIFACT_DIR not set or does not exists, exiting"
-    exit 1
+    echo "\$ARTIFACT_DIR not set or does not exists, no jUnit will be published"
+    make unit
   fi
 }
 

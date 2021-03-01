@@ -247,6 +247,17 @@ func (r *Reconciler) delete() error {
 		Ref:     vmRef,
 	}
 
+	isNodeAvailable, err := r.machineScope.checkNodeAvailability()
+	if err != nil {
+		return fmt.Errorf("%v: Can't check node status before vm destroy: %w", r.machine.GetName(), err)
+	}
+	if !isNodeAvailable {
+		klog.Infof("%v: node not ready, kubelet unreachable for some reason. Detaching disks before vm destroy.", r.machine.GetName())
+		if err := vm.detachPVDisks(); err != nil {
+			return fmt.Errorf("%v: Failed to detach virtual disks related to pvs: %w", r.machine.GetName(), err)
+		}
+	}
+
 	if _, err := vm.powerOffVM(); err != nil {
 		return err
 	}
@@ -998,6 +1009,49 @@ func (vm *virtualMachine) getNetworkStatusList(client *vim25.Client) ([]NetworkS
 	}
 
 	return networkStatusList, nil
+}
+
+type attachedDisk struct {
+	device   *types.VirtualDisk
+	fileName string
+	diskMode string
+}
+
+func (vm *virtualMachine) getAttachedDisks() ([]attachedDisk, error) {
+	var attachedDiskList []attachedDisk
+	devices, err := vm.Obj.Device(vm.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, disk := range devices.SelectByType((*types.VirtualDisk)(nil)) {
+		backingInfo := disk.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).(*types.VirtualDiskFlatVer2BackingInfo)
+		attachedDiskList = append(attachedDiskList, attachedDisk{
+			device:   disk.(*types.VirtualDisk),
+			fileName: backingInfo.FileName,
+			diskMode: backingInfo.DiskMode,
+		})
+	}
+
+	return attachedDiskList, nil
+}
+
+func (vm *virtualMachine) detachPVDisks() error {
+	disks, err := vm.getAttachedDisks()
+	if err != nil {
+		return err
+	}
+	for _, disk := range disks {
+		// TODO (dmoiseev): should be enough, but maybe worth to check if its PV for sure
+		if disk.diskMode != "persistent" {
+			klog.V(3).Infof("Detaching disk associated with file %v", disk.fileName)
+			if err := vm.Obj.RemoveDevice(vm.Context, true, disk.device); err != nil {
+				return err // TODO fill some err list, handle situation when there are more than one extra disk
+			}
+			klog.V(3).Infof("Disk associated with file %v have been detached", disk.fileName)
+		}
+	}
+	return nil
 }
 
 // IgnitionConfig returns a slice of option values that set the given data as
